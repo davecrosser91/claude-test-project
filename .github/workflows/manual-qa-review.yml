@@ -1,0 +1,177 @@
+name: Manual QA Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  qa-review:
+    runs-on: ubuntu-latest
+    name: AI Code Review
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR number
+        id: pr-number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // For manual dispatch, use input. For PR events, use context
+            const prNumber = context.payload.inputs?.pr_number || context.issue.number;
+            core.setOutput('pr_number', prNumber);
+            return prNumber;
+
+      - name: Get PR files
+        id: pr-files
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.pr-number.outputs.pr_number }};
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            return files.map(f => f.filename).join('\n');
+
+      - name: Run AI QA Review
+        uses: actions/github-script@v7
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          script: |
+            const fetch = require('node-fetch');
+            const prNumber = ${{ steps.pr-number.outputs.pr_number }};
+
+            // Get PR details
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            // Get diff
+            const { data: diff } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              mediaType: {
+                format: 'diff'
+              }
+            });
+
+            // Call Claude API for review
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 4096,
+                messages: [{
+                  role: 'user',
+                  content: `You are a senior code reviewer. Review this pull request and provide a verdict.
+
+PR Title: ${pr.title}
+PR Description: ${pr.body || 'No description provided'}
+
+Code Changes:
+\`\`\`diff
+${diff}
+\`\`\`
+
+Provide your review in this format:
+
+## QA Review Verdict: [PASS/FAIL_MINOR/FAIL_MAJOR]
+
+### Summary
+[Brief summary of changes]
+
+### Quality Assessment
+- Code Quality: [assessment]
+- Test Coverage: [assessment]
+- Security: [assessment]
+- Best Practices: [assessment]
+
+### Issues Found
+[List any issues, or "None"]
+
+### Recommendations
+[List recommendations, or "None"]
+
+Verdict guidelines:
+- PASS: Code is production-ready
+- FAIL_MINOR: Minor issues that can be quickly fixed
+- FAIL_MAJOR: Significant issues requiring rework`
+                }]
+              })
+            });
+
+            const result = await response.json();
+            const review = result.content[0].text;
+
+            // Post review as comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `## 🤖 Automated QA Review\n\n${review}\n\n---\n*Powered by Claude Sonnet 4*`
+            });
+
+            // Extract verdict
+            const verdictMatch = review.match(/Verdict:\s*(PASS|FAIL_MINOR|FAIL_MAJOR)/i);
+            const verdict = verdictMatch ? verdictMatch[1] : 'FAIL_MAJOR';
+
+            // Update PR labels based on verdict
+            if (verdict === 'PASS') {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['status:review']
+              });
+            } else if (verdict === 'FAIL_MINOR') {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['status:doing']
+              });
+            } else {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['status:todo']
+              });
+            }
+
+            core.setOutput('verdict', verdict);
+
+      - name: Update check status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const verdict = '${{ steps.qa-review.outputs.verdict }}';
+            const conclusion = verdict === 'PASS' ? 'success' : 'failure';
+
+            core.info(`QA Review verdict: ${verdict}`);
+            if (verdict !== 'PASS') {
+              core.setFailed(`QA Review failed with verdict: ${verdict}`);
+            }
