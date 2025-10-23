@@ -114,6 +114,78 @@ client = Client(account_sid, auth_token)
 - [Twilio API Reference](https://www.twilio.com/docs/api)
 - [Twilio Python Quickstart](https://www.twilio.com/docs/sms/quickstart/python)
 
+## Test Script
+
+### Twilio Call Simulation (`test_twilio_call.py`)
+
+This repository includes a test script that demonstrates how to:
+- Connect to the Twilio API
+- Initiate a phone call programmatically
+- Play audio during the call using TwiML (Twilio Markup Language)
+
+#### Running the Test Script
+
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Set up your Twilio credentials:**
+   ```bash
+   export TWILIO_ACCOUNT_SID='your_account_sid_here'
+   export TWILIO_AUTH_TOKEN='your_auth_token_here'
+   ```
+
+3. **Run the script:**
+   ```bash
+   python test_twilio_call.py <your_twilio_number> <destination_number>
+   ```
+
+   Example:
+   ```bash
+   python test_twilio_call.py +15551234567 +15559876543
+   ```
+
+   Or set environment variables and run without arguments:
+   ```bash
+   export TWILIO_PHONE_NUMBER='+15551234567'
+   export TEST_PHONE_NUMBER='+15559876543'
+   python test_twilio_call.py
+   ```
+
+#### What the Script Does
+
+When executed, the test script will:
+1. Connect to your Twilio account using the provided credentials
+2. Initiate a phone call from your Twilio number to the destination number
+3. During the call, it will:
+   - Greet the recipient in German using text-to-speech
+   - Play a sample MP3 audio file
+   - Say goodbye in German
+4. Display call details including the Call SID and status
+5. Provide a link to view the call in the Twilio Console
+
+#### Important Notes
+
+- **Trial Accounts:** If using a Twilio trial account, you can only call verified phone numbers
+- **Phone Number Format:** All phone numbers must be in E.164 format (e.g., +1234567890)
+- **Costs:** Making calls will incur charges based on your Twilio pricing plan
+- **Audio Files:** The script uses a sample audio file. You can modify the script to use your own audio files by changing the URL in the `create_twiml_audio_url()` function
+
+#### Customizing the Audio
+
+To use your own audio file, modify the `test_twilio_call.py` script:
+
+```python
+# Replace this line:
+response.play("http://demo.twilio.com/docs/classic.mp3")
+
+# With your own audio URL:
+response.play("https://your-domain.com/your-audio-file.mp3")
+```
+
+Supported audio formats: MP3, WAV, GSM, μ-law
+
 ## License
 
 This project is for demonstration purposes.
